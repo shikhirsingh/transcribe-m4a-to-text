@@ -1,6 +1,6 @@
 # Audio Transcription Script
 
-This bash script will take a m4a file which and convert it to a txt file which contains the transcription 
+This bash script will take a .m4a audio file and convert it to a .txt file which contains the transcription. This could be useful for a variety of transcription scenarios. 
 
 ## Overview
 
