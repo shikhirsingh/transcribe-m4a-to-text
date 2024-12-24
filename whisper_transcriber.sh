@@ -1,12 +1,13 @@
 #!/bin/bash
 
-# Colors for messages
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Colors for messages to enhance readability
+RED='\033[0;31m'      # Red for errors
+GREEN='\033[0;32m'    # Green for success
+YELLOW='\033[1;33m'   # Yellow for warnings or usage hints
+NC='\033[0m'          # No color reset
 
-# Step 0: Function to check if Docker is running
+# Function to check if Docker is running
+# This ensures the script doesn't proceed if Docker isn't available
 check_docker_running() {
   if ! docker info > /dev/null 2>&1; then
     echo -e "${RED}Docker is not running. Please start Docker and try again.${NC}"
@@ -20,11 +21,15 @@ check_docker_running() {
 }
 
 # Function to find an available port starting from 9000
+# Dynamically allocates ports to avoid conflicts with other services
 find_available_port() {
   local START_PORT=$1
   local PORT=$START_PORT
   while lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; do
-    if docker ps | grep -q "openai-whisper-asr-webservice" && docker inspect --format='{{(index (index .HostConfig.PortBindings "9000/tcp") 0).HostPort}}' $(docker ps -q --filter ancestor=onerahmet/openai-whisper-asr-webservice) | grep -q "$PORT"; then
+    # If Whisper ASR is already running on this port, reuse it
+    if docker ps | grep -q "openai-whisper-asr-webservice" && \
+       docker inspect --format='{{(index (index .HostConfig.PortBindings "9000/tcp") 0).HostPort}}' \
+       $(docker ps -q --filter ancestor=onerahmet/openai-whisper-asr-webservice) | grep -q "$PORT"; then
       echo "$PORT"
       return
     fi
@@ -33,7 +38,9 @@ find_available_port() {
   echo "$PORT"
 }
 
-# Function to generate unique file names
+# Function to generate unique file names with timestamps
+# Ensures files don’t overwrite each other
+# Adds counters if duplicates exist
 generate_unique_filename() {
   local BASE_NAME="$1"
   local EXT="$2"
@@ -50,13 +57,14 @@ generate_unique_filename() {
   echo "$FILENAME"
 }
 
-# Start timer
-START_TIME=$(date +%s)
+# Start timing the script execution
+START_TIME=$(date +%s)  # Capture the start time for elapsed time calculation
 
 # Step 0: Ensure Docker is running
 check_docker_running
 
 # Step 1: Validate input file and set up directories
+# Provides user-friendly feedback on usage and creates necessary directories
 echo "Step 1: Validating input file and setting up directories..."
 
 if [ -z "$1" ]; then
@@ -73,6 +81,7 @@ TRANSCRIBED_DIR="$RESULT_DIR/transcribed-output"
 mkdir -p "$WORKING_DIR"
 mkdir -p "$TRANSCRIBED_DIR"
 
+# Validate the input file
 if [ ! -f "$INPUT_FILE" ]; then
   echo -e "${RED}Error: Input file '$INPUT_FILE' does not exist.${NC}"
   exit 1
@@ -89,6 +98,8 @@ if [[ "$INPUT_FILE" != *.m4a ]]; then
 fi
 
 # Step 2: Convert m4a to wav
+# This uses FFmpeg via Docker to ensure cross-platform compatibility
+# Could be enhanced to support additional audio formats
 echo "Step 2: Converting $INPUT_FILE to WAV format. This may take a few moments..."
 OUTPUT_FILE=$(generate_unique_filename "converted" "wav" "$WORKING_DIR")
 docker run --rm -v "$(pwd)":/tmp -w /tmp jrottenberg/ffmpeg -i "$INPUT_FILE" "$OUTPUT_FILE"
@@ -101,6 +112,8 @@ fi
 echo -e "${GREEN}Conversion complete. Output file: $OUTPUT_FILE${NC}"
 
 # Step 3: Start Whisper ASR web service
+# Ensures that the transcription service is ready to process files
+# Could be extended to check Whisper ASR health before proceeding
 echo "Step 3: Ensuring Whisper ASR web service is running on port $WHISPER_PORT..."
 if ! docker ps | grep -q "openai-whisper-asr-webservice"; then
   echo "Starting Whisper ASR web service on port $WHISPER_PORT..."
@@ -118,6 +131,8 @@ else
 fi
 
 # Step 4: Transcribe the WAV file
+# Uploads the converted file to Whisper ASR and saves the output
+# Could benefit from retry logic for network issues
 echo "Step 4: Uploading $OUTPUT_FILE to Whisper service for transcription. You will see progress as the file uploads."
 TRANSCRIPTION_FILE=$(generate_unique_filename "transcribed" "txt" "$TRANSCRIBED_DIR")
 curl --progress-bar -F "audio_file=@$OUTPUT_FILE" -F "task=transcribe" -F "language=en" -F "output=txt" -F "word_timestamps=false" http://localhost:$WHISPER_PORT/asr > "$TRANSCRIPTION_FILE"
@@ -128,8 +143,9 @@ if [ $? -ne 0 ]; then
 fi
 
 # Final output
-END_TIME=$(date +%s)
-ELAPSED_TIME=$((END_TIME - START_TIME))
+END_TIME=$(date +%s)  # Capture the end time for elapsed time calculation
+ELAPSED_TIME=$((END_TIME - START_TIME))  # Calculate the total runtime
+
 echo -e "${GREEN}Transcription complete. Saved to: $TRANSCRIPTION_FILE${NC}"
 echo -e "${GREEN}All files have been saved to $RESULT_DIR.${NC}"
 echo -e "${GREEN}Total time elapsed: $ELAPSED_TIME seconds.${NC}"
