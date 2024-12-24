@@ -89,6 +89,10 @@ transcribe-231223
 - Ensure Docker has sufficient permissions to access the working directory.
 - Large audio files may take longer to process during conversion and transcription.
 
+## Testing Notes
+
+- Only tested on M1 Mac
+
 ## Future Improvements
 
 - Support for additional audio formats.
